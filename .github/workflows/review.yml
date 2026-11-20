@@ -1,0 +1,57 @@
+# The reusable workflow the reviewed repositories call (see README.md). It skips quietly when the secrets are missing,
+# as they are for pull requests from forks.
+name: UI/UX review
+
+on:
+  workflow_call:
+    inputs:
+      config:
+        type: string
+        default: .github/uiux-review.json
+      model:
+        type: string
+        default: claude-opus-5-5
+    secrets:
+      anthropic-api-key:
+        required: false
+      app-id:
+        required: false
+      app-private-key:
+        required: false
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - id: secrets
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.anthropic-api-key }}
+          APP_ID: ${{ secrets.app-id }}
+          APP_PRIVATE_KEY: ${{ secrets.app-private-key }}
+        run: |
+          if [ -n "$ANTHROPIC_API_KEY" ] && [ -n "$APP_ID" ] && [ -n "$APP_PRIVATE_KEY" ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::The secrets for the UI/UX review are not available here (a pull request from a fork?); skipping."
+          fi
+      - id: token
+        if: steps.secrets.outputs.ok == 'true'
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.app-id }}
+          private-key: ${{ secrets.app-private-key }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+      - if: steps.secrets.outputs.ok == 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - if: steps.secrets.outputs.ok == 'true'
+        uses: 4rtofl/uiux-auto-reviewer@main
+        with:
+          github-token: ${{ steps.token.outputs.token }}
+          anthropic-api-key: ${{ secrets.anthropic-api-key }}
+          config: ${{ inputs.config }}
+          model: ${{ inputs.model }}
