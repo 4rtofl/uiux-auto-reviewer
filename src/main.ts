@@ -3,12 +3,14 @@
 // In GitHub Actions (see action.yml) everything comes from the environment. To try it locally without posting:
 //   UIUX_GITHUB_TOKEN=$(gh auth token) ANTHROPIC_API_KEY=... \
 //     node src/main.ts --repo 4rtofl/Gasho --pr 123 --workspace ../Gasho --dry-run
-// --print-input prints what would be sent to Claude and stops (no API key needed).
+// --print-input prints what would be sent to Claude and stops (no Claude credentials needed). Without ANTHROPIC_API_KEY
+// or the federation variables (see auth.ts), the SDK falls back to an `ant auth login` profile.
 // The workspace must have the pull request's head checked out, since line numbers are read from it.
 import { execFileSync } from "node:child_process";
 import { appendFile, readFile } from "node:fs/promises";
 import path from "node:path";
 import { parseArgs } from "node:util";
+import { clientOptions, describeAuth, resolveAuth } from "./auth.ts";
 import { isReviewed, loadConfig } from "./config.ts";
 import { buildInput, linkedIssues, listInventory } from "./context.ts";
 import { GitHub, type Issue } from "./github.ts";
@@ -125,8 +127,9 @@ async function main(): Promise<void> {
     return;
   }
 
-  const apiKey = required("ANTHROPIC_API_KEY", env.ANTHROPIC_API_KEY);
-  const { review, usage } = await runReview({ apiKey, model, input: input.text, taste });
+  const auth = resolveAuth(env);
+  console.log(`Claude credentials: ${describeAuth(auth)}`);
+  const { review, usage } = await runReview({ client: clientOptions(auth, env), model, input: input.text, taste });
   const scored = score(review, input.reviewed);
   const context = { repository, headSha: pull.head.sha, scored, summary: review.summary, omitted: input.omitted, usage };
   const comment = renderComment(context);

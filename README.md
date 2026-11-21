@@ -50,21 +50,58 @@ Org の Settings → Developer settings → GitHub Apps → New GitHub App で�
 - Repository permissions：Contents は Read-only、Pull requests は Read and write、Checks は Read and write
 - 作ったあと、秘密鍵（private key）を生成して、Gasho と GashoPlugins にインストールする
 
-### 2. シークレットを登録する（Org で 1 回）
+### 2. App のシークレットを登録する（Org で 1 回）
+
+Org の Settings → Secrets and variables → Actions → Secrets で登録し、Repository access を Gasho と GashoPlugins に絞ります。
 
 | 名前 | 中身 |
 |---|---|
-| `ANTHROPIC_API_KEY` | Claude の API キー |
 | `UIUX_APP_ID` | App の ID |
 | `UIUX_APP_PRIVATE_KEY` | App の秘密鍵（.pem の中身） |
 
-### 3. レビューするリポジトリに置くもの
+### 3. Claude の認証を用意する
+
+Workload Identity Federation（WIF）を使います。GitHub Actions が発行する OIDC トークンを、10 分で切れる Claude API のトークンに交換するので、API キーをシークレットに置かずに済みます。
+
+**Claude Console で（組織の admin が 1 回）**
+
+1. Settings → Workload identity → **Connect workload** → **GitHub Actions** を選ぶ。発行元（issuer）、サービスアカウント、ルールが作られます。
+2. ルールの一致条件を次のようにする。リポジトリごとにルールを 1 つ作ります（Gasho 用と GashoPlugins 用）。
+
+   | 項目 | 値 |
+   |---|---|
+   | `subject_prefix` | `repo:4rtofl/Gasho:pull_request` |
+   | `audience` | `https://api.anthropic.com` |
+   | `claims` | `repository_owner`: `4rtofl`、`job_workflow_ref`: `4rtofl/uiux-auto-reviewer/.github/workflows/review.yml@refs/heads/main` |
+   | `oauth_scope` | `workspace:developer` |
+   | `token_lifetime_seconds` | `600` |
+
+   `job_workflow_ref` を固定すると、このリポジトリのレビュー用ワークフロー以外はトークンを受け取れません。
+3. ワークスペースに月の利用上限を設定する。
+4. 組織 ID（Settings → Organization）、ルール ID（`fdrl_...`）、サービスアカウント ID（`svac_...`）、ワークスペース ID（`wrkspc_...`）を控える。
+
+**GitHub で**
+
+レビューするリポジトリの Settings → Secrets and variables → Actions → **Variables** に登録します。どれも秘密ではありません。ルールはリポジトリごとなので、`ANTHROPIC_FEDERATION_RULE_ID` はリポジトリごとに違う値になります。
+
+| 名前 | 中身 |
+|---|---|
+| `ANTHROPIC_FEDERATION_RULE_ID` | ルール ID（`fdrl_...`） |
+| `ANTHROPIC_ORGANIZATION_ID` | 組織 ID |
+| `ANTHROPIC_SERVICE_ACCOUNT_ID` | サービスアカウント ID（`svac_...`、省略可） |
+| `ANTHROPIC_WORKSPACE_ID` | ワークスペース ID（`wrkspc_...`、ルールが複数のワークスペースにまたがるときは必須） |
+
+**API キーで動かす場合**
+
+WIF を使わないなら、`ANTHROPIC_FEDERATION_RULE_ID` を登録せず、シークレット `ANTHROPIC_API_KEY` に API キーを入れます。両方あるときは WIF を使います。
+
+### 4. レビューするリポジトリに置くもの
 
 - `.github/workflows/uiux-review.yml`：[examples/uiux-review.yml](examples/uiux-review.yml) をコピーします。
 - `.github/uiux-review.json`：対象のパスなどの設定です（下記）。
 - `.github/uiux-taste.md`（任意）：リポジトリごとの例外です。ここに書いたことは指摘されません。
 
-レビューが走るのは、PR を開いたとき（下書きは除く）、下書きを ready for review にしたとき、`uiux-review` ラベルを付けたときです。もう一度レビューするには、ラベルを外して付け直します。fork からの PR ではシークレットが渡らないので、何もせずに終わります。
+レビューが走るのは、PR を開いたとき（下書きは除く）、下書きを ready for review にしたとき、`uiux-review` ラベルを付けたときです。もう一度レビューするには、ラベルを外して付け直します。fork からの PR ではシークレットも OIDC トークンも渡らないので、何もせずに終わります。
 
 ### 設定（`.github/uiux-review.json`）
 
@@ -102,7 +139,7 @@ Org の Settings → Developer settings → GitHub Apps → New GitHub App で�
 npm ci
 # Claude に渡す内容だけを表示する（API キー不要）
 UIUX_GITHUB_TOKEN=$(gh auth token) node src/main.ts --repo 4rtofl/Gasho --pr 226 --workspace ../Gasho --print-input
-# レビューまで行う
+# レビューまで行う（ANTHROPIC_API_KEY がなければ、`ant auth login` のプロファイルを使う）
 UIUX_GITHUB_TOKEN=$(gh auth token) ANTHROPIC_API_KEY=... node src/main.ts --repo 4rtofl/Gasho --pr 226 --workspace ../Gasho --dry-run
 ```
 

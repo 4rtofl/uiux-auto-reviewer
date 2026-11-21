@@ -1,4 +1,4 @@
-import Anthropic from "@anthropic-ai/sdk";
+import Anthropic, { type ClientOptions } from "@anthropic-ai/sdk";
 import { RUBRIC } from "./rubric.ts";
 import { REVIEW_JSON_SCHEMA, ReviewSchema, type Review } from "./schema.ts";
 import type { Usage } from "./render.ts";
@@ -13,12 +13,12 @@ export interface ReviewResult {
 // One request: the rubric (cached) and the repository's taste file as the system prompt, the pull request as the user
 // message, and the answer held to the JSON Schema. No tools, so that nothing in the pull request can make it act.
 export async function runReview(options: {
-  apiKey: string;
+  client: ClientOptions;
   model: string;
   input: string;
   taste: string | null;
 }): Promise<ReviewResult> {
-  const client = new Anthropic({ apiKey: options.apiKey });
+  const client = new Anthropic(options.client);
   const system: Anthropic.Beta.BetaTextBlockParam[] = [{ type: "text", text: RUBRIC, cache_control: { type: "ephemeral" } }];
   if (options.taste) {
     system.push({

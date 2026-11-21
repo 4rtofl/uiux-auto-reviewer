@@ -1,5 +1,5 @@
-# The reusable workflow the reviewed repositories call (see README.md). It skips quietly when the secrets are missing,
-# as they are for pull requests from forks.
+# The reusable workflow the reviewed repositories call (see README.md). It skips quietly when the credentials are
+# missing, as they are for pull requests from forks.
 name: UI/UX review
 
 on:
@@ -11,6 +11,19 @@ on:
       model:
         type: string
         default: claude-opus-5-5
+      # Workload Identity Federation (no Claude API key). These IDs are not secret; pass them from Actions variables.
+      anthropic-federation-rule-id:
+        type: string
+        default: ""
+      anthropic-organization-id:
+        type: string
+        default: ""
+      anthropic-service-account-id:
+        type: string
+        default: ""
+      anthropic-workspace-id:
+        type: string
+        default: ""
     secrets:
       anthropic-api-key:
         required: false
@@ -23,17 +36,21 @@ jobs:
   review:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write # the GitHub OIDC token that Workload Identity Federation exchanges
     steps:
       - id: secrets
         env:
           ANTHROPIC_API_KEY: ${{ secrets.anthropic-api-key }}
+          FEDERATION_RULE_ID: ${{ inputs.anthropic-federation-rule-id }}
           APP_ID: ${{ secrets.app-id }}
           APP_PRIVATE_KEY: ${{ secrets.app-private-key }}
         run: |
-          if [ -n "$ANTHROPIC_API_KEY" ] && [ -n "$APP_ID" ] && [ -n "$APP_PRIVATE_KEY" ]; then
+          if [ -n "$APP_ID" ] && [ -n "$APP_PRIVATE_KEY" ] && { [ -n "$FEDERATION_RULE_ID" ] || [ -n "$ANTHROPIC_API_KEY" ]; }; then
             echo "ok=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::notice::The secrets for the UI/UX review are not available here (a pull request from a fork?); skipping."
+            echo "::notice::The credentials for the UI/UX review are not available here (a pull request from a fork?); skipping."
           fi
       - id: token
         if: steps.secrets.outputs.ok == 'true'
@@ -53,5 +70,9 @@ jobs:
         with:
           github-token: ${{ steps.token.outputs.token }}
           anthropic-api-key: ${{ secrets.anthropic-api-key }}
+          anthropic-federation-rule-id: ${{ inputs.anthropic-federation-rule-id }}
+          anthropic-organization-id: ${{ inputs.anthropic-organization-id }}
+          anthropic-service-account-id: ${{ inputs.anthropic-service-account-id }}
+          anthropic-workspace-id: ${{ inputs.anthropic-workspace-id }}
           config: ${{ inputs.config }}
           model: ${{ inputs.model }}

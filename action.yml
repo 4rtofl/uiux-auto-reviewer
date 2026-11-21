@@ -5,8 +5,20 @@ inputs:
     description: Token that posts the check run and the comment (the GitHub App's installation token).
     required: true
   anthropic-api-key:
-    description: Claude API key.
-    required: true
+    description: Claude API key. Not needed with Workload Identity Federation.
+    default: ""
+  anthropic-federation-rule-id:
+    description: "Workload Identity Federation: the federation rule (fdrl_...). Takes precedence over the API key; the job needs `id-token: write`."
+    default: ""
+  anthropic-organization-id:
+    description: "Workload Identity Federation: the Claude Console organization ID."
+    default: ""
+  anthropic-service-account-id:
+    description: "Workload Identity Federation: the rule's service account (svac_...), optional."
+    default: ""
+  anthropic-workspace-id:
+    description: "Workload Identity Federation: the workspace (wrkspc_...), needed when the rule covers more than one."
+    default: ""
   config:
     description: Path of the settings file in the reviewed repository.
     default: .github/uiux-review.json
@@ -30,6 +42,10 @@ runs:
       env:
         UIUX_GITHUB_TOKEN: ${{ inputs.github-token }}
         ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
+        ANTHROPIC_FEDERATION_RULE_ID: ${{ inputs.anthropic-federation-rule-id }}
+        ANTHROPIC_ORGANIZATION_ID: ${{ inputs.anthropic-organization-id }}
+        ANTHROPIC_SERVICE_ACCOUNT_ID: ${{ inputs.anthropic-service-account-id }}
+        ANTHROPIC_WORKSPACE_ID: ${{ inputs.anthropic-workspace-id }}
         UIUX_CONFIG: ${{ inputs.config }}
         UIUX_MODEL: ${{ inputs.model }}
         UIUX_DRY_RUN: ${{ inputs.dry-run }}
