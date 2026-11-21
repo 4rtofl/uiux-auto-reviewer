@@ -1,5 +1,4 @@
 import { axisLabel, SEVERITY_LABELS } from "./axes.ts";
-import type { Annotation } from "./github.ts";
 import type { Finding } from "./schema.ts";
 import { reviewedMarker } from "./reuse.ts";
 import { verdict, type Scored } from "./score.ts";
@@ -62,7 +61,9 @@ export function headline(scored: Scored): string {
   return `${total}、${verdict(scored.maxSeverity)}`;
 }
 
-export function renderBody(context: RenderContext): string {
+// links: the review comment of each finding put on its line, by the finding's index. Those findings are listed in one
+// line with a link; the others keep their full text, since the summary is the only place they appear.
+export function renderBody(context: RenderContext, links: Map<number, string> = new Map()): string {
   const { scored } = context;
   const out: string[] = [];
   const applicable = scored.axes.filter((axis) => axis.score !== null).length;
@@ -83,6 +84,13 @@ export function renderBody(context: RenderContext): string {
   if (scored.findings.length > 0) {
     out.push("### 指摘（深刻度の高い順）");
     scored.findings.forEach((finding, index) => {
+      const link = links.get(index);
+      if (link) {
+        out.push(
+          `#### ${index + 1}. 【${SEVERITY_LABELS[finding.severity]}・${finding.severity}】${oneLine(finding.title)}\n${location(context, finding)}　観点：${axisLabel(finding.axis)}　→ [行へのコメント](${link})`,
+        );
+        return;
+      }
       out.push(
         [
           `#### ${index + 1}. 【${SEVERITY_LABELS[finding.severity]}・${finding.severity}】${oneLine(finding.title)}`,
@@ -124,17 +132,6 @@ export function renderBody(context: RenderContext): string {
   return out.join("\n\n");
 }
 
-export function renderComment(context: RenderContext): string {
-  return `## 🎨 UI/UX レビュー\n\n${renderBody(context)}\n\n${MARKER}\n${reviewedMarker(context.headSha)}`;
-}
-
-export function annotations(scored: Scored): Annotation[] {
-  return scored.findings.map((finding) => ({
-    path: finding.file,
-    start_line: finding.line,
-    end_line: finding.end_line,
-    annotation_level: finding.severity >= 4 ? "failure" : finding.severity === 3 ? "warning" : "notice",
-    title: `【${SEVERITY_LABELS[finding.severity]}】${finding.title}`.slice(0, 255),
-    message: `${finding.evidence}\n\n直し方：${finding.suggestion}\n（観点：${axisLabel(finding.axis)}、根拠：${finding.principle}）`.slice(0, 64_000),
-  }));
+export function renderComment(context: RenderContext, links: Map<number, string> = new Map()): string {
+  return `## 🎨 UI/UX レビュー\n\n${renderBody(context, links)}\n\n${MARKER}\n${reviewedMarker(context.headSha)}`;
 }

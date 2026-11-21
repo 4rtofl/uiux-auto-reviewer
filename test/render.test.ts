@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { annotations, cost, defuse, MARKER, renderComment } from "../src/render.ts";
+import { cost, defuse, MARKER, renderComment } from "../src/render.ts";
 import { reviewedSha } from "../src/reuse.ts";
 import { score } from "../src/score.ts";
 import { finding } from "./helpers.ts";
@@ -23,7 +23,13 @@ test("the comment links findings to the head commit and ends with the markers", 
   assert.match(comment, /【重大・3】削除に確認がない/);
   assert.ok(comment.includes(MARKER));
   assert.equal(reviewedSha(comment), "c".repeat(40));
-  const [annotation] = annotations(scored);
-  assert.equal(annotation?.annotation_level, "warning");
-  assert.equal(annotation?.start_line, 2);
+  assert.match(comment, /\*\*直し方\*\*：確認ダイアログを出す/);
+});
+
+test("a finding put on its line is listed with a link instead of its full text", () => {
+  const scored = score({ summary: "総評です。", axes: [], findings: [finding()] }, new Map([["src/a.tsx", 10]]));
+  const context = { repository: "o/r", headSha: "c".repeat(40), scored, summary: "総評です。", omitted: [], usage: null };
+  const comment = renderComment(context, new Map([[0, "https://github.com/o/r/pull/10#discussion_r1"]]));
+  assert.match(comment, /→ \[行へのコメント\]\(https:\/\/github.com\/o\/r\/pull\/10#discussion_r1\)/);
+  assert.doesNotMatch(comment, /直し方/);
 });

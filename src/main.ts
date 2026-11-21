@@ -17,8 +17,10 @@ import { parseArgs } from "node:util";
 import { clientOptions, describeAuth, resolveAuth } from "./auth.ts";
 import { configFromText, isReviewed } from "./config.ts";
 import { buildInput, linkedIssues, listInventory } from "./context.ts";
-import { GitHub, type Annotation, type Conclusion, type Issue, type PullRequest } from "./github.ts";
-import { annotations, headline, MARKER, renderBody, renderComment } from "./render.ts";
+import { GitHub, type Annotation, type Conclusion, type Issue, type NewReviewComment, type PullFile, type PullRequest } from "./github.ts";
+import { FINDING_MARKER, findingComment, findingIndex, placement } from "./inline.ts";
+import { headline, MARKER, renderBody, renderComment } from "./render.ts";
+import type { Finding } from "./schema.ts";
 import { carriedOverNote, reviewedSha, stillHolds } from "./reuse.ts";
 import { runReview } from "./review.ts";
 import { score } from "./score.ts";
@@ -219,9 +221,54 @@ async function review(options: {
     console.log(`\n${comment}`);
     return;
   }
-  await check.finish("neutral", headline(scored), renderBody(context), annotations(scored));
-  if (existing) await github.updateComment(existing.id, comment);
-  else await github.createComment(pull.number, comment);
+  await check.finish("neutral", headline(scored), renderBody(context));
+  const links = await postFindings(github, pull, scored.findings, files);
+  const summary = renderComment(context, links);
+  if (existing) await github.updateComment(existing.id, summary);
+  else await github.createComment(pull.number, summary);
+}
+
+// Resolves the threads of the last review's findings, then puts each new finding on its line as one "Comment" review.
+// Returns the comment of each finding that got one, by the finding's index. A failure here leaves the findings in the
+// summary comment only, so it is logged rather than failing the review.
+async function postFindings(github: GitHub, pull: PullRequest, findings: Finding[], files: PullFile[]): Promise<Map<number, string>> {
+  try {
+    for (const thread of await github.unresolvedThreads(pull.number, FINDING_MARKER)) await github.resolveThread(thread);
+  } catch (error) {
+    console.warn("warning: could not resolve the last review's threads:", error);
+  }
+  const patches = new Map(files.map((file) => [file.filename, file.patch]));
+  const comments = findings.flatMap((finding, index): NewReviewComment[] => {
+    const place = placement(patches.get(finding.file), finding.line, finding.end_line);
+    if (!place) return [];
+    return [
+      {
+        path: finding.file,
+        side: "RIGHT",
+        line: place.line,
+        ...(place.start_line === undefined ? {} : { start_line: place.start_line, start_side: "RIGHT" as const }),
+        body: findingComment(finding, index),
+      },
+    ];
+  });
+  console.log(`${comments.length} of ${findings.length} finding(s) are on lines of the diff`);
+  if (comments.length === 0) return new Map();
+  try {
+    const review = await github.createReview(pull.number, {
+      commit_id: pull.head.sha,
+      body: `🎨 UI/UX レビューの指摘 ${comments.length} 件を、該当する行に付けました。点数とまとめは PR のコメントにあります。`,
+      comments,
+    });
+    const links = new Map<number, string>();
+    for (const comment of await github.reviewComments(pull.number, review.id)) {
+      const index = findingIndex(comment.body);
+      if (index !== null) links.set(index, comment.html_url);
+    }
+    return links;
+  } catch (error) {
+    console.warn("warning: could not post the findings on their lines:", error);
+    return new Map();
+  }
 }
 
 // Copies the completed check run of the last reviewed commit to the new head, when nothing reviewed changed since.

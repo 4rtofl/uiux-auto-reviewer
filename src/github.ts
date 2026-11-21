@@ -1,5 +1,6 @@
 // The few GitHub REST calls the reviewer makes, over fetch, with the installation token of the GitHub App.
 const API = process.env.GITHUB_API_URL ?? "https://api.github.com";
+const GRAPHQL = process.env.GITHUB_GRAPHQL_URL ?? "https://api.github.com/graphql";
 
 export interface PullRequest {
   number: number;
@@ -52,6 +53,21 @@ export interface CheckRun {
   output: { title: string | null; summary: string | null };
 }
 
+export interface ReviewComment {
+  id: number;
+  html_url: string;
+  body: string;
+}
+
+export interface NewReviewComment {
+  path: string;
+  line: number;
+  side: "RIGHT";
+  start_line?: number;
+  start_side?: "RIGHT";
+  body: string;
+}
+
 export type Conclusion = "success" | "neutral" | "skipped" | "failure";
 
 export class GitHubError extends Error {
@@ -92,6 +108,23 @@ export class GitHub {
       throw new GitHubError(response.status, `${method} ${route}: ${response.status} ${await response.text()}`);
     }
     return (response.status === 204 ? undefined : await response.json()) as T;
+  }
+
+  async #graphql<T>(query: string, variables: Record<string, unknown>): Promise<T> {
+    const response = await fetch(GRAPHQL, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${this.#token}`,
+        "content-type": "application/json",
+        "user-agent": "uiux-auto-reviewer",
+      },
+      body: JSON.stringify({ query, variables }),
+    });
+    const result = (await response.json()) as { data?: T; errors?: { message: string }[] };
+    if (!response.ok || result.errors?.length || !result.data) {
+      throw new GitHubError(response.status, `GraphQL: ${response.status} ${JSON.stringify(result.errors ?? result)}`);
+    }
+    return result.data;
   }
 
   async #paginate<T>(route: string): Promise<T[]> {
@@ -151,6 +184,56 @@ export class GitHub {
 
   checkRunAnnotations(id: number): Promise<Annotation[]> {
     return this.#paginate(`/check-runs/${id}/annotations`);
+  }
+
+  // A "Comment" review (neither approving nor requesting changes) with comments on lines of the diff.
+  createReview(number: number, params: { commit_id: string; body: string; comments: NewReviewComment[] }) {
+    return this.#request<{ id: number; html_url: string }>("POST", `/pulls/${number}/reviews`, { ...params, event: "COMMENT" });
+  }
+
+  reviewComments(number: number, reviewId: number): Promise<ReviewComment[]> {
+    return this.#paginate(`/pulls/${number}/reviews/${reviewId}/comments`);
+  }
+
+  // The unresolved review threads whose first comment contains the marker.
+  async unresolvedThreads(number: number, marker: string): Promise<string[]> {
+    const ids: string[] = [];
+    let after: string | null = null;
+    for (;;) {
+      const data: {
+        repository: {
+          pullRequest: {
+            reviewThreads: {
+              nodes: { id: string; isResolved: boolean; comments: { nodes: { body: string }[] } }[];
+              pageInfo: { hasNextPage: boolean; endCursor: string | null };
+            };
+          } | null;
+        };
+      } = await this.#graphql(
+        `query($owner: String!, $repo: String!, $number: Int!, $after: String) {
+          repository(owner: $owner, name: $repo) {
+            pullRequest(number: $number) {
+              reviewThreads(first: 100, after: $after) {
+                nodes { id isResolved comments(first: 1) { nodes { body } } }
+                pageInfo { hasNextPage endCursor }
+              }
+            }
+          }
+        }`,
+        { owner: this.owner, repo: this.repo, number, after },
+      );
+      const threads = data.repository.pullRequest?.reviewThreads;
+      if (!threads) return ids;
+      for (const thread of threads.nodes) {
+        if (!thread.isResolved && thread.comments.nodes[0]?.body.includes(marker)) ids.push(thread.id);
+      }
+      if (!threads.pageInfo.hasNextPage) return ids;
+      after = threads.pageInfo.endCursor;
+    }
+  }
+
+  async resolveThread(threadId: string): Promise<void> {
+    await this.#graphql(`mutation($id: ID!) { resolveReviewThread(input: { threadId: $id }) { thread { id } } }`, { id: threadId });
   }
 
   async issue(number: number): Promise<Issue | null> {
