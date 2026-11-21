@@ -66,23 +66,23 @@ Workload Identity Federation（WIF）を使います。GitHub Actions が発行�
 **Claude Console で（組織の admin が 1 回）**
 
 1. Settings → Workload identity → **Connect workload** → **GitHub Actions** を選ぶ。発行元（issuer）、サービスアカウント、ルールが作られます。
-2. ルールの一致条件を次のようにする。リポジトリごとにルールを 1 つ作ります（Gasho 用と GashoPlugins 用）。
+2. ルールの一致条件を次のようにする。1 つのルールで、Org 内のレビューするリポジトリすべてに使えます。
 
    | 項目 | 値 |
    |---|---|
-   | `subject_prefix` | `repo:4rtofl/Gasho:pull_request` |
+   | `subject_prefix` | `repo:4rtofl@338377614/*`（4rtofl の数値 ID。`gh api orgs/4rtofl -q .id` で調べる） |
    | `audience` | `https://api.anthropic.com` |
-   | `claims` | `repository_owner`: `4rtofl`、`job_workflow_ref`: `4rtofl/uiux-auto-reviewer/.github/workflows/review.yml@refs/heads/main` |
+   | `claims` | `event_name`: `pull_request`、`job_workflow_ref`: `4rtofl/uiux-auto-reviewer/.github/workflows/review.yml@refs/heads/main` |
    | `oauth_scope` | `workspace:developer` |
    | `token_lifetime_seconds` | `600` |
 
-   `job_workflow_ref` を固定すると、このリポジトリのレビュー用ワークフロー以外はトークンを受け取れません。
+   GitHub のトークンの `sub` は `repo:4rtofl@338377614/Gasho@1453677721:pull_request` のように、組織とリポジトリの数値 ID を含む形です。数値 ID で一致させるので、組織名が手放されて誰かに取られても一致しません。`event_name` で PR の実行だけに、`job_workflow_ref` でこのリポジトリのレビュー用ワークフローだけに絞ります。ブランチ（ref）は指定しません（PR の実行では `refs/pull/<番号>/merge` になるため）。
 3. ワークスペースに月の利用上限を設定する。
 4. 組織 ID（Settings → Organization）、ルール ID（`fdrl_...`）、サービスアカウント ID（`svac_...`）、ワークスペース ID（`wrkspc_...`）を控える。
 
 **GitHub で**
 
-レビューするリポジトリの Settings → Secrets and variables → Actions → **Variables** に登録します。どれも秘密ではありません。ルールはリポジトリごとなので、`ANTHROPIC_FEDERATION_RULE_ID` はリポジトリごとに違う値になります。
+レビューするリポジトリの Settings → Secrets and variables → Actions → **Variables** に登録します。どれも秘密ではありません。
 
 | 名前 | 中身 |
 |---|---|
