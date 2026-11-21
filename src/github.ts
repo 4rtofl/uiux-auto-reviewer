@@ -43,6 +43,17 @@ export interface Annotation {
   message: string;
 }
 
+export interface CheckRun {
+  id: number;
+  status: string;
+  conclusion: string | null;
+  external_id: string | null;
+  app: { id: number } | null;
+  output: { title: string | null; summary: string | null };
+}
+
+export type Conclusion = "success" | "neutral" | "skipped" | "failure";
+
 export class GitHubError extends Error {
   readonly status: number;
   constructor(status: number, message: string) {
@@ -101,6 +112,47 @@ export class GitHub {
     return this.#paginate(`/pulls/${number}/files`);
   }
 
+  // A file of the repository at a commit, or null when it is not there.
+  async fileAt(file: string, ref: string): Promise<string | null> {
+    const route = `/contents/${file.split("/").map(encodeURIComponent).join("/")}?ref=${encodeURIComponent(ref)}`;
+    try {
+      const content = await this.#request<{ type: string; content?: string; encoding?: string }>("GET", route);
+      if (content.type !== "file" || content.encoding !== "base64" || content.content === undefined) return null;
+      return Buffer.from(content.content, "base64").toString("utf8");
+    } catch (error) {
+      if (error instanceof GitHubError && error.status === 404) return null;
+      throw error;
+    }
+  }
+
+  // The files changed between two commits, or null when GitHub cannot compare them (a force push dropped the base, or
+  // the comparison is over its 300-file limit).
+  async changedBetween(base: string, head: string): Promise<string[] | null> {
+    try {
+      const comparison = await this.#request<{ files?: { filename: string; previous_filename?: string }[] }>(
+        "GET",
+        `/compare/${base}...${head}`,
+      );
+      if (!comparison.files || comparison.files.length >= 300) return null;
+      return comparison.files.flatMap((file) => [file.filename, ...(file.previous_filename ? [file.previous_filename] : [])]);
+    } catch (error) {
+      if (error instanceof GitHubError && (error.status === 404 || error.status === 422)) return null;
+      throw error;
+    }
+  }
+
+  async checkRuns(sha: string, name: string): Promise<CheckRun[]> {
+    const result = await this.#request<{ check_runs: CheckRun[] }>(
+      "GET",
+      `/commits/${sha}/check-runs?check_name=${encodeURIComponent(name)}&filter=all&per_page=100`,
+    );
+    return result.check_runs;
+  }
+
+  checkRunAnnotations(id: number): Promise<Annotation[]> {
+    return this.#paginate(`/check-runs/${id}/annotations`);
+  }
+
   async issue(number: number): Promise<Issue | null> {
     try {
       return await this.#request<Issue>("GET", `/issues/${number}`);
@@ -122,15 +174,22 @@ export class GitHub {
     return this.#request("PATCH", `/issues/comments/${id}`, { body });
   }
 
-  createCheckRun(params: { name: string; head_sha: string; status: "in_progress"; details_url?: string }) {
-    return this.#request<{ id: number; html_url: string }>("POST", "/check-runs", params);
+  createCheckRun(params: {
+    name: string;
+    head_sha: string;
+    status: "in_progress";
+    external_id?: string;
+    details_url?: string;
+    output?: { title: string; summary: string };
+  }) {
+    return this.#request<CheckRun>("POST", "/check-runs", params);
   }
 
   updateCheckRun(
     id: number,
     params: {
       status: "completed";
-      conclusion: "success" | "neutral" | "skipped" | "failure";
+      conclusion: Conclusion;
       output: { title: string; summary: string; annotations?: Annotation[] };
     },
   ) {

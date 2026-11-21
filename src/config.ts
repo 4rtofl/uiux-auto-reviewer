@@ -1,7 +1,7 @@
-import { readFile } from "node:fs/promises";
 import path from "node:path";
 
-// The per-repository settings, read from the reviewed repository (.github/uiux-review.json by default).
+// The per-repository settings, read from the reviewed repository (.github/uiux-review.json by default) at the pull
+// request's base.
 export interface Config {
   // Changed files matching these globs are reviewed; nothing else is.
   paths: string[];
@@ -29,15 +29,18 @@ export const DEFAULT_CONFIG: Config = {
   maxIssues: 3,
 };
 
-export async function loadConfig(workspace: string, configPath: string): Promise<Config> {
-  let text: string;
+// The settings come from the tip of the pull request's base branch (not the base commit it was opened on, which may
+// predate them), never its head, so that a pull request cannot loosen its own review
+// (exclude its files, or add exceptions to the taste file). No file means the defaults.
+export function configFromText(text: string | null, source: string): Config {
+  if (text === null) return DEFAULT_CONFIG;
+  let raw: unknown;
   try {
-    text = await readFile(path.join(workspace, configPath), "utf8");
+    raw = JSON.parse(text);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return DEFAULT_CONFIG;
-    throw error;
+    throw new Error(`${source}: not valid JSON (${(error as Error).message})`);
   }
-  return parseConfig(JSON.parse(text) as unknown, configPath);
+  return parseConfig(raw, source);
 }
 
 export function parseConfig(raw: unknown, source: string): Config {

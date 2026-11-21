@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { annotations, cost, defuse, MARKER, renderComment } from "../src/render.ts";
+import { reviewedSha } from "../src/reuse.ts";
 import { score } from "../src/score.ts";
 import { finding } from "./helpers.ts";
 
@@ -14,13 +15,14 @@ test("cost uses the model's prices, and unknown models have none", () => {
   assert.equal(cost({ ...usage, model: "other" }), null);
 });
 
-test("the comment links findings to the head commit and ends with the marker", () => {
+test("the comment links findings to the head commit and ends with the markers", () => {
   const scored = score({ summary: "総評です。", axes: [], findings: [finding({ line: 2, end_line: 4 })] }, new Map([["src/a.tsx", 10]]));
   const comment = renderComment({ repository: "o/r", headSha: "c".repeat(40), scored, summary: "総評です。", omitted: [], usage: null });
   assert.match(comment, /^## 🎨 UI\/UX レビュー/);
   assert.match(comment, new RegExp(`https://github.com/o/r/blob/${"c".repeat(40)}/src/a.tsx#L2-L4`));
   assert.match(comment, /【重大・3】削除に確認がない/);
-  assert.ok(comment.endsWith(MARKER));
+  assert.ok(comment.includes(MARKER));
+  assert.equal(reviewedSha(comment), "c".repeat(40));
   const [annotation] = annotations(scored);
   assert.equal(annotation?.annotation_level, "warning");
   assert.equal(annotation?.start_line, 2);
