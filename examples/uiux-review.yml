@@ -3,7 +3,9 @@ name: UI/UX review
 
 on:
   pull_request:
-    types: [opened, ready_for_review, labeled]
+    # synchronize: a new head needs its own check; when no reviewed file changed, the last result is carried over
+    # without calling Claude.
+    types: [opened, reopened, synchronize, ready_for_review, labeled]
 
 permissions:
   contents: read

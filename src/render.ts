@@ -1,6 +1,7 @@
 import { axisLabel, SEVERITY_LABELS } from "./axes.ts";
 import type { Annotation } from "./github.ts";
 import type { Finding } from "./schema.ts";
+import { reviewedMarker } from "./reuse.ts";
 import { verdict, type Scored } from "./score.ts";
 
 export const MARKER = "<!-- uiux-auto-reviewer -->";
@@ -124,7 +125,7 @@ export function renderBody(context: RenderContext): string {
 }
 
 export function renderComment(context: RenderContext): string {
-  return `## 🎨 UI/UX レビュー\n\n${renderBody(context)}\n\n${MARKER}`;
+  return `## 🎨 UI/UX レビュー\n\n${renderBody(context)}\n\n${MARKER}\n${reviewedMarker(context.headSha)}`;
 }
 
 export function annotations(scored: Scored): Annotation[] {
